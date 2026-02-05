@@ -8,6 +8,7 @@ import { Box, NodeProps, Origin, RenderProp } from './base';
 import { SafeTextInstanceNode, TextInstanceNode } from './text-instance';
 import { ImageNode, SafeImageNode } from './image';
 import { SafeTspanNode, TspanNode } from './tspan';
+import { NoteNode, SafeNoteNode } from './note';
 
 interface TextProps extends NodeProps {
   /**
@@ -45,7 +46,7 @@ export type TextNode = {
   yogaNode?: YogaNode;
   lines?: Paragraph;
   alignOffset?: number; // TODO: Remove this
-  children?: (TextNode | TextInstanceNode | ImageNode | TspanNode)[];
+  children?: (TextNode | TextInstanceNode | ImageNode | TspanNode | NoteNode)[];
 };
 
 export type SafeTextNode = Omit<TextNode, 'style' | 'children'> & {
@@ -55,5 +56,6 @@ export type SafeTextNode = Omit<TextNode, 'style' | 'children'> & {
     | SafeTextInstanceNode
     | SafeImageNode
     | SafeTspanNode
+    | SafeNoteNode
   )[];
 };

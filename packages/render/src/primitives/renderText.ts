@@ -1,9 +1,10 @@
+import * as P from '@react-pdf/primitives';
 import { isNil } from '@react-pdf/fns';
 
 import renderGlyphs from './renderGlyphs';
 import parseColor from '../utils/parseColor';
 import { Context } from '../types';
-import { SafeTextNode } from '@react-pdf/layout';
+import { SafeTextNode, SafeNoteNode } from '@react-pdf/layout';
 import {
   Attachment,
   AttributedString,
@@ -224,6 +225,49 @@ const renderBlock = (ctx: Context, block: Paragraph) => {
   });
 };
 
+type NoteWithCharIndex = {
+  note: SafeNoteNode;
+  charIndex: number;
+};
+
+/**
+ * Recursively collect Note nodes along with their character index in the
+ * flattened text. The charIndex indicates where the Note's parent Text
+ * content starts in the attributed string.
+ */
+const collectNotesWithCharIndex = (
+  children: SafeTextNode['children'],
+  charIndex = 0,
+): { notes: NoteWithCharIndex[]; charIndex: number } => {
+  const notes: NoteWithCharIndex[] = [];
+  if (!children) return { notes, charIndex };
+
+  let currentIndex = charIndex;
+
+  for (const child of children) {
+    if (child.type === P.Note) {
+      // Record the Note with its current character position
+      notes.push({ note: child as SafeNoteNode, charIndex: currentIndex });
+    } else if (child.type === P.TextInstance) {
+      // Text content advances the character index
+      currentIndex += (child as any).value?.length || 0;
+    } else if (child.type === P.Image) {
+      // Images take 1 character (object replacement char)
+      currentIndex += 1;
+    } else if ('children' in child && child.children) {
+      // Recurse into nested Text nodes
+      const result = collectNotesWithCharIndex(
+        child.children as SafeTextNode['children'],
+        currentIndex,
+      );
+      notes.push(...result.notes);
+      currentIndex = result.charIndex;
+    }
+  }
+
+  return { notes, charIndex: currentIndex };
+};
+
 const renderText = (ctx: Context, node: SafeTextNode) => {
   if (!node.box) return;
   if (!node.lines) return;
@@ -241,6 +285,72 @@ const renderText = (ctx: Context, node: SafeTextNode) => {
   blocks.forEach((block) => {
     renderBlock(ctx, block);
   });
+
+  // Render any Note children embedded inside this Text node.
+  // Notes are positioned at the start of their parent Text's content.
+  // We track character indices to map Notes to their rendered positions.
+  const { notes: notesWithIndex } = collectNotesWithCharIndex(node.children);
+  if (notesWithIndex.length > 0) {
+    const NOTE_SIZE = 16;
+
+    // Helper to find X,Y position for a character index
+    // Run indices reset per line, so we track a cumulative offset
+    const findPositionForCharIndex = (
+      targetIndex: number,
+    ): { x: number; y: number } | null => {
+      let globalOffset = 0;
+      for (const line of node.lines) {
+        if (!line.box) continue;
+        // Get the line's character range
+        const lineStart = globalOffset;
+        const lineEnd =
+          globalOffset + (line.runs[line.runs.length - 1]?.end ?? 0);
+
+        if (targetIndex >= lineStart && targetIndex < lineEnd) {
+          // Target is in this line - find the run
+          const localIndex = targetIndex - globalOffset;
+          let runX = line.box.x;
+          for (const run of line.runs) {
+            const runStart = run.start ?? 0;
+            const runEnd = run.end ?? runStart;
+            if (localIndex >= runStart && localIndex < runEnd) {
+              // Found the run containing this character
+              const charOffset = localIndex - runStart;
+              let xOffset = 0;
+              if (run.positions && charOffset > 0) {
+                for (
+                  let i = 0;
+                  i < charOffset && i < run.positions.length;
+                  i++
+                ) {
+                  xOffset += run.positions[i].xAdvance || 0;
+                }
+              }
+              return { x: runX + xOffset, y: line.box.y };
+            }
+            runX += run.xAdvance || 0;
+          }
+        }
+        // Advance global offset by the line's character count
+        globalOffset = lineEnd;
+      }
+      return null;
+    };
+
+    for (const { note, charIndex } of notesWithIndex) {
+      const value = note.children?.[0]?.value || '';
+      const color = note.style?.backgroundColor;
+
+      // Find position for this character index, or fall back to origin
+      const pos = findPositionForCharIndex(charIndex) || {
+        x: offsetX,
+        y: initialY,
+      };
+      ctx.note(pos.x, pos.y, NOTE_SIZE, NOTE_SIZE, value, {
+        color,
+      });
+    }
+  }
 
   ctx.restore();
 };

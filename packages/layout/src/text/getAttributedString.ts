@@ -21,6 +21,8 @@ const isImage = (node: SafeNode): node is SafeImageNode =>
 const isTextInstance = (node: SafeNode): node is SafeTextInstanceNode =>
   node.type === P.TextInstance;
 
+const isNote = (node: SafeNode): boolean => node.type === P.Note;
+
 /**
  * Get textkit fragments of given node object
  *
@@ -105,7 +107,11 @@ const getFragments = (
   for (let i = 0; i < instance.children.length; i += 1) {
     const child = instance.children[i];
 
-    if (isImage(child)) {
+    if (isNote(child)) {
+      // Skip Note nodes — they are preserved in the children array
+      // and rendered separately after text glyphs by renderText.
+      continue;
+    } else if (isImage(child)) {
       fragments.push({
         string: String.fromCharCode(0xfffc),
         attributes: {
